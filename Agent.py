@@ -28,6 +28,7 @@ class Agent(object):
 
 class RandomAgent(Agent):
     def __init__(self, seed=None):
+        self.seed = seed
         self.rng = default_rng(seed)
 
     def get_move(self, board_state: 'Game'):
@@ -35,6 +36,14 @@ class RandomAgent(Agent):
 
     def __repr__(self):
         return 'RandomAgent'
+
+    def __getstate__(self):
+        self_dict = self.__dict__.copy()
+        self_dict['rng'] = default_rng(self.seed)
+        return self_dict
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
 
 @dataclass
@@ -251,8 +260,14 @@ class ParallelTree(UCTAgent):
     def __init__(self, num_processes=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.num_processes = os.cpu_count() if num_processes is None else num_processes
+        self.pool = None
 
-    def get_move_single(self, board_state: 'Game', output_q: 'mp.Queue', start_time):
+    def __del__(self):
+        if 'pool' in self.__dict__ and self.pool is not None:
+            self.pool.close()
+            self.pool.terminate()
+
+    def get_move_single(self, board_state: 'Game', start_time):
         # 0. Create a root node, with state "board_state"
         root_node = Node(board_state, board_state.current_turn)
 
@@ -272,30 +287,20 @@ class ParallelTree(UCTAgent):
             i += 1
 
         # Put move data in queue
-        output_q.put(root_node.to_move_data())
-        # return root_node
+        # output_q.put(root_node.to_move_data())
+        return root_node.to_move_data()
 
     def get_move(self, board_state: 'Game') -> Tuple[int, float]:
+        if self.pool is None:
+            self.pool = mp.Pool(processes=self.num_processes)
 
-        # Construct the worker processes
-        process_list = []
-        output_queue = mp.Queue(self.num_processes)
         start_time = datetime.datetime.utcnow()
-        for proc in range(self.num_processes):
-            work_process = mp.Process(target=self.get_move_single,
-                                      args=(deepcopy(board_state),
-                                            output_queue,
-                                            start_time))
-            work_process.daemon = True
-            process_list.append(work_process)
-            work_process.start()
+        results = [self.pool.apply_async(self.get_move_single,
+                                         args=(deepcopy(board_state),
+                                               start_time))
+                   for _ in range(self.num_processes)]
 
-        # Join all the worker processes
-        for worker_process in process_list:
-            worker_process.join()
-
-        # Get the results from the worker processes
-        states = [output_queue.get() for _ in range(self.num_processes)]
+        states = [res.get() for res in results]
 
         # Merge the move data from each process
         combined_data = reduce(merge_move_data, states)
@@ -320,3 +325,99 @@ class ParallelTree(UCTAgent):
         logging.debug(f'Parallel: {len([1 for state in states if len(state) != 0])} processes contributed')
         return best_act, (1 + best_score) / 2.0
 
+    def __getstate__(self):
+        self_dict = self.__dict__.copy()
+        if 'pool' in self_dict:
+            del self_dict['pool']
+        return self_dict
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+
+class ParallelLeaf(UCTAgent):
+    def __init__(self, num_processes=None, playout_mult=1, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.num_processes = os.cpu_count() if num_processes is None else num_processes
+        self.num_playouts_per = int(playout_mult * self.num_processes)
+        self.pool = None
+
+    def __del__(self):
+        if 'pool' in self.__dict__ and self.pool is not None:
+            self.pool.close()
+            self.pool.terminate()
+
+    def default_policy(self, leaf_state: 'Game'):
+        async_results = [self.pool.apply_async(self.playout,
+                                               args=(leaf_state, -1 * leaf_state.current_turn))
+                         for _ in range(self.num_playouts_per)]
+
+        return [res.get() for res in async_results]
+
+    def backup(self, v: 'Node', deltas: list):
+        n_v = len(deltas)
+        delta = sum(deltas)
+
+        while v is not None:
+            v.num_visits += n_v
+            v.score += delta
+            delta = -1*delta
+            v = v.parent
+
+    def get_move_single(self, board_state: 'Game', start_time):
+        # 0. Create a root node, with state "board_state"
+        root_node = Node(board_state, board_state.current_turn)
+
+        # While we are within our computation budget....
+        #  TODO: Add some early stopping criteria if a dominant move has emerged?
+        i = 0
+        while datetime.datetime.utcnow() - start_time < self.calculation_time and i < self.max_generations:
+            # 1. From `board_state`, navigate, via the tree_policy, to some leaf node
+            leaf = self.tree_policy(root_node)
+
+            # 2. Perform a playout from a random child of the leaf node, via the default policy
+            delta = self.default_policy(leaf.state)
+
+            # 3. Backup the results through the tree structure
+            self.backup(leaf, delta)
+
+            i += 1
+
+        # Put move data in queue
+        return root_node.to_move_data()
+
+    def get_move(self, board_state: 'Game') -> Tuple[int, float]:
+        if self.pool is None:
+            self.pool = mp.Pool(processes=self.num_processes)
+
+        start_time = datetime.datetime.utcnow()
+        combined_data = self.get_move_single(deepcopy(board_state), start_time)
+
+        # 4. Return the action which results in the best child
+        #  TODO: Compare performance versus an agent with "robust child" selection criteria.
+        #  Additionally, it has been suggested that if "best child" and "most robust child" disagree, allotting
+        #   more compute time can be worthwhile
+
+        # Get the best child
+        best_act = -1
+        best_score = -1
+        for action, (sc, num_moves) in combined_data.items():
+            val = sc / num_moves
+            if val > best_score:
+                best_score = val
+                best_act = action
+
+        num_playouts_total = sum(v[1] for v in combined_data.values())
+        self.playouts_performed.append(num_playouts_total)
+        logging.debug(f'Leaf: {num_playouts_total} moves evaluated')
+        return best_act, (1 + best_score) / 2.0
+
+    def __getstate__(self):
+        self_dict = self.__dict__.copy()
+        if 'pool' in self_dict:
+            del self_dict['pool']
+        return self_dict
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)

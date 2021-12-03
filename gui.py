@@ -1,7 +1,7 @@
 import PySimpleGUI as sg
 from multiprocessing import freeze_support
 
-from Agent import RandomAgent, UCTAgent, ParallelTree
+from Agent import RandomAgent, UCTAgent, ParallelTree, ParallelLeaf
 from utils import *
 
 import logging
@@ -14,13 +14,14 @@ piece_to_color = {
 
 name_to_agent = {
     'Random': RandomAgent(),
-    'MCTS': UCTAgent(max_generations=10000),
-    'Root-MCTS': ParallelTree(max_generations=10000)
+    'MCTS': UCTAgent(max_generations=100000),
+    'Root-MCTS': ParallelTree(max_generations=100000),
+    'Leaf-MCTS': ParallelLeaf(playout_mult=4, max_generations=100000)
 }
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
     freeze_support()
+    logging.basicConfig(level=logging.DEBUG)
 
     game = Game()
     opponent = ParallelTree(time=3, max_generations=10000)
