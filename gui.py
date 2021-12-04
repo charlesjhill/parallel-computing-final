@@ -37,6 +37,7 @@ if __name__ == "__main__":
         [sg.T('Agent'), sg.Combo(values=list(name_to_agent.keys()), default_value='MCTS', key='agent_option')],
         [sg.Check(text='Engine First', key='engine_first')],
         [sg.T('Engine Time'), sg.Spin(values=list(range(2, 10)), initial_value=3, key='depth')],
+        [sg.T('Num Processes'), sg.Spin(values=list(range(1, 17)), initial_value=16, key='num_procs')],
         [sg.B('New Game')]
     ]
     layout = [
@@ -90,6 +91,7 @@ if __name__ == "__main__":
 
         opponent = name_to_agent[values['agent_option']]
         opponent.set_calculation_time(values['depth'])
+        opponent.set_num_processes(values['num_procs'])
 
         if event == 'New Game':
             # Reset Board

@@ -7,7 +7,7 @@ import tqdm
 from Agent import UCTAgent, ParallelTree, SelectionCriteria
 from utils import Game
 
-NUM_TRIALS = 1
+NUM_TRIALS = 5
 
 logging.basicConfig(level=logging.INFO)
 
@@ -66,15 +66,17 @@ if __name__ == "__main__":
             winner = 'agent_one' if winner == agent_one_color else 'agent_two'
             results.append({'length': game.num_moves, 'winner': winner})
 
+        del agent_two
+
     # Print summary statistics
     wins_for_one = sum(1 for d in results if d['winner'] == 'agent_one')
     wins_for_two = sum(1 for d in results if d['winner'] == 'agent_two')
     draws = NUM_TRIALS - wins_for_one - wins_for_two
 
-    print(f'Agent One ({repr(agent_one)}): {wins_for_one} Wins, {wins_for_two} Losses, {draws} Draws')
+    print(f'Agent One (UCTAgent): {wins_for_one} Wins, {wins_for_two} Losses, {draws} Draws')
     print(f'\t Average Response Time (s): {mean(one_response_times):.4f}')
     print(f'\t Average Playouts Per Move: {mean(one_playouts):.2f}')
-    print(f'Agent Two ({repr(agent_two)}): {wins_for_two} Wins, {wins_for_one} Losses, {draws} Draws')
+    print(f'Agent Two (ParallelTree): {wins_for_two} Wins, {wins_for_one} Losses, {draws} Draws')
     print(f'\t Average Response Time (s): {mean(two_response_times):.4f}')
     print(f'\t Average Playouts Per Move: {mean(two_playouts):.2f}')
 

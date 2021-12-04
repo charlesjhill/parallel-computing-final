@@ -25,6 +25,9 @@ class Agent(object):
     def set_calculation_time(self, t):
         pass
 
+    def set_num_processes(self, n):
+        pass
+
 
 class RandomAgent(Agent):
     def __init__(self, seed=None):
@@ -271,6 +274,18 @@ class ParallelTree(UCTAgent):
         return f'ParallelTree(generations_per_move={self.generations_per_move}, max_generations={self.max_generations}, ' \
                f'time={self.calculation_time}, criteria={self.move_criteria})'
 
+    def set_num_processes(self, n):
+        if n == self.num_processes:
+            return
+
+        n = max(1, min(os.cpu_count(), n))
+        self.num_processes = n
+
+        if 'pool' in self.__dict__ and self.pool is not None:
+            self.pool.close()
+            self.pool.terminate()
+            self.pool = None
+
     def get_move_single(self, board_state: 'Game', start_time):
         # 0. Create a root node, with state "board_state"
         root_node = Node(board_state, board_state.current_turn)
@@ -318,10 +333,11 @@ class ParallelTree(UCTAgent):
         best_act = -1
         best_score = -1
         for action, (sc, num_moves) in combined_data.items():
-            val = sc / num_moves
-            if val > best_score:
-                best_score = val
-                best_act = action
+            if board_state.can_play(action):
+                val = sc / num_moves
+                if val > best_score:
+                    best_score = val
+                    best_act = action
 
         num_playouts_total = sum(v[1] for v in combined_data.values())
         self.playouts_performed.append(num_playouts_total)
