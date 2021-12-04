@@ -267,6 +267,10 @@ class ParallelTree(UCTAgent):
             self.pool.close()
             self.pool.terminate()
 
+    def __repr__(self):
+        return f'ParallelTree(generations_per_move={self.generations_per_move}, max_generations={self.max_generations}, ' \
+               f'time={self.calculation_time}, criteria={self.move_criteria})'
+
     def get_move_single(self, board_state: 'Game', start_time):
         # 0. Create a root node, with state "board_state"
         root_node = Node(board_state, board_state.current_turn)
